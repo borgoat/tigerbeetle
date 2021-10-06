@@ -1,9 +1,9 @@
-usingnamespace @import("tigerbeetle.zig");
-usingnamespace @import("demo.zig");
+const tb = @import("tigerbeetle.zig");
+const demo = @import("demo.zig");
 
 pub fn main() !void {
-    const accounts = [_]Account{
-        Account{
+    const accounts = [_]tb.Account{
+        tb.Account{
             .id = 1,
             .user_data = 0,
             .reserved = [_]u8{0} ** 48,
@@ -15,7 +15,7 @@ pub fn main() !void {
             .credits_reserved = 0,
             .credits_accepted = 10000, // Let's start with some liquidity.
         },
-        Account{
+        tb.Account{
             .id = 2,
             .user_data = 0,
             .reserved = [_]u8{0} ** 48,
@@ -29,5 +29,5 @@ pub fn main() !void {
         },
     };
 
-    try Demo.request(.create_accounts, accounts, Demo.on_create_accounts);
+    try demo.request(.create_accounts, accounts, demo.on_create_accounts);
 }

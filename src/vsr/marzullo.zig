@@ -116,7 +116,7 @@ pub const Marzullo = struct {
     /// with no duration, which can be found by the algorithm by sorting the lower bound before the
     /// upper bound. Alternatively, if such pathological overlaps are considered objectionable then
     /// they can be avoided by sorting the upper bound before the lower bound.
-    fn less_than(context: void, a: Tuple, b: Tuple) bool {
+    fn less_than(_: void, a: Tuple, b: Tuple) bool {
         if (a.offset < b.offset) return true;
         if (b.offset < a.offset) return false;
         if (a.bound == .lower and b.bound == .upper) return true;

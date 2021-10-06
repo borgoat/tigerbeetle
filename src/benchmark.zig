@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const builtin = @import("builtin");
 const config = @import("config.zig");
 
 const cli = @import("cli.zig");
@@ -65,7 +66,7 @@ pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
 
-    if (std.builtin.mode != .ReleaseSafe and std.builtin.mode != .ReleaseFast) {
+    if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
         try stderr.print("Benchmark must be built as ReleaseSafe for minimum performance.\n", .{});
     }
 

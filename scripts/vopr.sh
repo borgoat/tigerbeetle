@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-# Install Zig 0.8.0 if it does not already exist:
-if [ ! -d "zig" ]; then
-    scripts/install_zig.sh 0.8.0
-    echo ""
-    echo "Running the TigerBeetle VOPR for the first time..."
-    echo "Visit https://www.tigerbeetle.com"
-    sleep 2
-fi
+zig09=/home/ifreund/downloads/zig-linux-x86_64-0.9.0-dev.1324+598db831f/zig
 
 # If a seed is provided as an argument then replay the seed, otherwise test a 1,000 seeds:
 if [ "$1" ]; then
@@ -23,9 +16,9 @@ if [ "$1" ]; then
     fi
     echo ""
 
-    zig/zig run src/simulator.zig $BUILD_MODE -- $1
+    $zig09 run src/simulator.zig $BUILD_MODE -- $1
 else
-    zig/zig build-exe src/simulator.zig -OReleaseSafe
+    $zig09 build-exe src/simulator.zig -OReleaseSafe
     for I in {1..1000}
     do
         ./simulator

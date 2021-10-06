@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const math = std.math;
+const builtin = @import("builtin");
 
 const config = @import("../config.zig");
 
@@ -278,7 +279,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             return self.entry_for_op(header.op + 1);
         }
 
-        pub fn next_offset(self: *Self, header: *const Header) u64 {
+        pub fn next_offset(header: *const Header) u64 {
             // TODO Snapshots
             assert(header.command == .prepare);
             return header.offset + vsr.sector_ceil(header.size);
@@ -860,7 +861,7 @@ pub fn Journal(comptime Replica: type, comptime Storage: type) type {
             const sectors = message.buffer[0..vsr.sector_ceil(message.header.size)];
             assert(message.header.offset + sectors.len <= self.size_circular_buffer);
 
-            if (std.builtin.mode == .Debug) {
+            if (builtin.mode == .Debug) {
                 // Assert that any sector padding has already been zeroed:
                 var sum_of_sector_padding_bytes: u32 = 0;
                 for (sectors[message.header.size..]) |byte| sum_of_sector_padding_bytes += byte;

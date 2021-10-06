@@ -115,7 +115,10 @@ pub fn Client(comptime StateMachine: type, comptime MessageBus: type) type {
             return self;
         }
 
-        pub fn deinit(self: *Self) void {}
+        // TODO
+        pub fn deinit(self: *Self) void {
+            _ = self;
+        }
 
         pub fn on_message(self: *Self, message: *Message) void {
             log.debug("{}: on_message: {}", .{ self.id, message.header });

@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const builtin = @import("builtin");
 
 /// Using blocking syscalls, write a page, fsync the write, then read the page back in.
 /// Rinse and repeat to iterate across a large file.
@@ -7,7 +8,7 @@ const assert = std.debug.assert;
 /// This should be the fastest candidate after io_uring, faster than Zig's evented I/O on Linux
 /// since it does not context switch to an async I/O thread.
 pub fn main() !void {
-    if (std.builtin.os.tag != .linux) return error.LinuxRequired;
+    if (builtin.os.tag != .linux) return error.LinuxRequired;
 
     const size: usize = 256 * 1024 * 1024;
     const page: usize = 4096;

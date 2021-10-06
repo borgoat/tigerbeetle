@@ -34,6 +34,7 @@ pub const Account = packed struct {
     }
 
     pub fn jsonStringify(self: Account, options: std.json.StringifyOptions, writer: anytype) !void {
+        _ = options;
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"id\":{},", .{self.id});
         try std.fmt.format(writer, "\"user_data\":\"{x:0>32}\",", .{self.user_data});
@@ -77,6 +78,8 @@ pub const AccountFlags = packed struct {
         options: std.json.StringifyOptions,
         writer: anytype,
     ) !void {
+        _ = self;
+        _ = options;
         try writer.writeAll("{}");
     }
 };
@@ -105,6 +108,7 @@ pub const Transfer = packed struct {
         options: std.json.StringifyOptions,
         writer: anytype,
     ) !void {
+        _ = options;
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"id\":{},", .{self.id});
         try std.fmt.format(writer, "\"debit_account_id\":{},", .{self.debit_account_id});
@@ -137,6 +141,7 @@ pub const TransferFlags = packed struct {
         options: std.json.StringifyOptions,
         writer: anytype,
     ) !void {
+        _ = options;
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"accept\":{},", .{self.accept});
         try std.fmt.format(writer, "\"reject\":{},", .{self.reject});
@@ -164,6 +169,7 @@ pub const Commit = packed struct {
         options: std.json.StringifyOptions,
         writer: anytype,
     ) !void {
+        _ = options;
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"id\":{},", .{self.id});
         try std.fmt.format(writer, "\"reserved\":\"{x:0>64}\",", .{self.reserved});
@@ -191,6 +197,7 @@ pub const CommitFlags = packed struct {
         options: std.json.StringifyOptions,
         writer: anytype,
     ) !void {
+        _ = options;
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"accept\":{},", .{self.accept});
         try std.fmt.format(writer, "\"reject\":{},", .{self.reject});
@@ -199,7 +206,7 @@ pub const CommitFlags = packed struct {
     }
 };
 
-pub const CreateAccountResult = packed enum(u32) {
+pub const CreateAccountResult = enum(u32) {
     ok,
     linked_event_failed,
     exists,
@@ -214,7 +221,7 @@ pub const CreateAccountResult = packed enum(u32) {
     reserved_flag_padding,
 };
 
-pub const CreateTransferResult = packed enum(u32) {
+pub const CreateTransferResult = enum(u32) {
     ok,
     linked_event_failed,
     exists,
@@ -241,7 +248,7 @@ pub const CreateTransferResult = packed enum(u32) {
     timeout_reserved_for_two_phase_commit,
 };
 
-pub const CommitTransferResult = packed enum(u32) {
+pub const CommitTransferResult = enum(u32) {
     ok,
     linked_event_failed,
     reserved_field,
@@ -273,10 +280,11 @@ pub const CreateAccountsResult = packed struct {
     }
 
     pub fn jsonStringify(
-        self: CreateAccountResults,
+        self: CreateAccountsResult,
         options: std.json.StringifyOptions,
         writer: anytype,
     ) !void {
+        _ = options;
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"index\":{},", .{self.index});
         try std.fmt.format(writer, "\"result\":\"{}\"", .{@tagName(self.result)});
@@ -293,10 +301,11 @@ pub const CreateTransfersResult = packed struct {
     }
 
     pub fn jsonStringify(
-        self: CreateTransferResults,
+        self: CreateTransfersResult,
         options: std.json.StringifyOptions,
         writer: anytype,
     ) !void {
+        _ = options;
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"index\":{},", .{self.index});
         try std.fmt.format(writer, "\"result\":\"{}\"", .{@tagName(self.result)});
@@ -313,10 +322,11 @@ pub const CommitTransfersResult = packed struct {
     }
 
     pub fn jsonStringify(
-        self: CommitTransferResults,
+        self: CommitTransfersResult,
         options: std.json.StringifyOptions,
         writer: anytype,
     ) !void {
+        _ = options;
         try writer.writeAll("{");
         try std.fmt.format(writer, "\"index\":{},", .{self.index});
         try std.fmt.format(writer, "\"result\":\"{}\"", .{@tagName(self.result)});
@@ -325,7 +335,7 @@ pub const CommitTransfersResult = packed struct {
 };
 
 comptime {
-    const target = std.Target.current;
+    const target = @import("builtin").target;
 
     if (target.os.tag != .linux and !target.isDarwin()) {
         @compileError("linux or macos required for io");

@@ -1,6 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const builtin = std.builtin;
+const builtin = @import("builtin");
 const net = std.net;
 const os = std.os;
 const IO_Uring = os.linux.IO_Uring;

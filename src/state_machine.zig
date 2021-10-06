@@ -2,7 +2,16 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.state_machine);
 
-usingnamespace @import("tigerbeetle.zig");
+const tb = @import("tigerbeetle.zig");
+const Account = tb.Account;
+const Transfer = tb.Transfer;
+const Commit = tb.Commit;
+const CreateAccountsResult = tb.CreateAccountsResult;
+const CreateTransfersResult = tb.CreateTransfersResult;
+const CommitTransfersResult = tb.CommitTransfersResult;
+const CreateAccountResult = tb.CreateAccountResult;
+const CreateTransferResult = tb.CreateTransferResult;
+const CommitTransferResult = tb.CommitTransferResult;
 
 const HashMapAccounts = std.AutoHashMap(u128, Account);
 const HashMapTransfers = std.AutoHashMap(u128, Transfer);
@@ -20,10 +29,6 @@ pub const StateMachine = struct {
         create_transfers,
         commit_transfers,
         lookup_accounts,
-
-        pub fn jsonStringify(self: Command, options: StringifyOptions, writer: anytype) !void {
-            try std.fmt.format(writer, "\"{}\"", .{@tagName(self)});
-        }
     };
 
     allocator: *std.mem.Allocator,
@@ -136,6 +141,7 @@ pub const StateMachine = struct {
         input: []const u8,
         output: []u8,
     ) usize {
+        _ = client;
         return switch (operation) {
             .init => unreachable,
             .register => 0,
@@ -258,7 +264,7 @@ pub const StateMachine = struct {
         var output_len = @divFloor(output.len, @sizeOf(Account)) * @sizeOf(Account);
         var results = std.mem.bytesAsSlice(Account, output[0..output_len]);
         var results_count: usize = 0;
-        for (batch) |id, index| {
+        for (batch) |id| {
             if (self.get_account(id)) |result| {
                 results[results_count] = result.*;
                 results_count += 1;

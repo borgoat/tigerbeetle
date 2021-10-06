@@ -136,7 +136,6 @@ pub const Network = struct {
 
     fn deliver_message(packet: Packet, path: PacketSimulatorPath) void {
         const network = packet.network;
-        const source_bus = &network.busses.items[path.source];
         const target_bus = &network.busses.items[path.target];
 
         const message = target_bus.get_message() orelse {

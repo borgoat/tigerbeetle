@@ -162,8 +162,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
         }
 
         pub fn path_queue(self: *Self, path: Path) *std.PriorityQueue(Data) {
-            var index = self.path_index(path);
-            return &self.paths[@as(usize, path.source) * self.options.node_count + path.target];
+            return &self.paths[self.path_index(path)];
         }
 
         fn is_clogged(self: *Self, path: Path) bool {
@@ -171,6 +170,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
         }
 
         fn should_clog(self: *Self, path: Path) bool {
+            _ = path;
             return self.prng.random.uintAtMost(u8, 100) < self.options.path_clog_probability;
         }
 

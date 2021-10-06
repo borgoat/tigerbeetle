@@ -43,7 +43,9 @@ pub const MessageBus = struct {
     }
 
     /// TODO
-    pub fn deinit(bus: *MessageBus) void {}
+    pub fn deinit(bus: *MessageBus) void {
+        _ = bus;
+    }
 
     pub fn set_on_message(
         bus: *MessageBus,
@@ -59,7 +61,9 @@ pub const MessageBus = struct {
         bus.on_message_context = context;
     }
 
-    pub fn tick(self: *MessageBus) void {}
+    pub fn tick(bus: *MessageBus) void {
+        _ = bus;
+    }
 
     pub fn get_message(bus: *MessageBus) ?*Message {
         return bus.pool.get_message();

@@ -16,7 +16,7 @@ pub const Clock = @import("vsr/clock.zig").Clock;
 pub const Journal = @import("vsr/journal.zig").Journal;
 
 /// Viewstamped Replication protocol commands:
-pub const Command = packed enum(u8) {
+pub const Command = enum(u8) {
     reserved,
 
     ping,
@@ -549,12 +549,12 @@ pub fn parse_addresses(allocator: *std.mem.Allocator, raw: []const u8) ![]std.ne
     errdefer allocator.free(addresses);
 
     var index: usize = 0;
-    var comma_iterator = std.mem.split(raw, ",");
+    var comma_iterator = std.mem.split(u8, raw, ",");
     while (comma_iterator.next()) |raw_address| : (index += 1) {
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
         if (index == config.replicas_max) return error.AddressLimitExceeded;
 
-        var colon_iterator = std.mem.split(raw_address, ":");
+        var colon_iterator = std.mem.split(u8, raw_address, ":");
         // The split iterator will always return non-null once, even if the delimiter is not found:
         const raw_ipv4 = colon_iterator.next().?;
 

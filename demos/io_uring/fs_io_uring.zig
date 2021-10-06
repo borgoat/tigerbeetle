@@ -2,6 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const IO_Uring = std.os.linux.IO_Uring;
 const io_uring_cqe = std.os.linux.io_uring_cqe;
+const builtin = @import("builtin");
 
 /// Using non-blocking io_uring, write a page, fsync the write, then read the page back in.
 /// Rinse and repeat to iterate across a large file.
@@ -16,7 +17,7 @@ const io_uring_cqe = std.os.linux.io_uring_cqe;
 /// * Finegrained submission, at present we simply submit a batch of events then wait for a batch.
 ///   We could also submit a batch of events, and then submit partial batches as events complete.
 pub fn main() !void {
-    if (std.builtin.os.tag != .linux) return error.LinuxRequired;
+    if (builtin.os.tag != .linux) return error.LinuxRequired;
 
     const size: usize = 256 * 1024 * 1024;
     const page: usize = 4096;

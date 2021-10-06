@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
+const builtin = @import("builtin");
 
 const config = @import("config.zig");
 
@@ -119,7 +120,7 @@ pub const MessagePool = struct {
     pub fn unref(pool: *MessagePool, message: *Message) void {
         message.references -= 1;
         if (message.references == 0) {
-            if (std.builtin.mode == .Debug) mem.set(u8, message.buffer, undefined);
+            if (builtin.mode == .Debug) mem.set(u8, message.buffer, undefined);
             if (message.header_only()) {
                 message.next = pool.header_only_free_list;
                 pool.header_only_free_list = message;

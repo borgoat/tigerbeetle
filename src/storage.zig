@@ -2,13 +2,16 @@ const std = @import("std");
 const os = std.os;
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
-const log = std.log.scoped(.storage);
+
+const builtin = @import("builtin");
+const is_darwin = builtin.target.isDarwin();
 
 const IO = @import("io.zig").IO;
-const is_darwin = std.Target.current.isDarwin();
 
 const config = @import("config.zig");
 const vsr = @import("vsr.zig");
+
+const log = std.log.scoped(.storage);
 
 pub const Storage = struct {
     /// See usage in Journal.write_sectors() for details.
@@ -90,7 +93,7 @@ pub const Storage = struct {
         buffer: []u8,
         offset: u64,
     ) void {
-        self.assert_alignment(buffer, offset);
+        assert_alignment(buffer, offset);
 
         read.* = .{
             .completion = undefined,
@@ -227,7 +230,7 @@ pub const Storage = struct {
         buffer: []const u8,
         offset: u64,
     ) void {
-        self.assert_alignment(buffer, offset);
+        assert_alignment(buffer, offset);
 
         write.* = .{
             .completion = undefined,
@@ -295,7 +298,7 @@ pub const Storage = struct {
     /// If this is not the case, then the underlying syscall will return EINVAL.
     /// We check this only at the start of a read or write because the physical sector size may be
     /// less than our logical sector size so that partial IOs then leave us no longer aligned.
-    fn assert_alignment(self: *Storage, buffer: []const u8, offset: u64) void {
+    fn assert_alignment(buffer: []const u8, offset: u64) void {
         assert(@ptrToInt(buffer.ptr) % config.sector_size == 0);
         assert(buffer.len % config.sector_size == 0);
         assert(offset % config.sector_size == 0);
@@ -327,20 +330,20 @@ pub const Storage = struct {
         assert(size >= config.sector_size);
         assert(size % config.sector_size == 0);
 
-        // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
+        // TODO Use O.EXCL when opening as a block device to obtain a mandatory exclusive lock.
         // This is much stronger than an advisory exclusive lock, and is required on some platforms.
 
-        var flags: u32 = os.O_CLOEXEC | os.O_RDWR | os.O_DSYNC;
+        var flags: u32 = os.O.CLOEXEC | os.O.RDWR | os.O.DSYNC;
         var mode: os.mode_t = 0;
 
         // TODO Document this and investigate whether this is in fact correct to set here.
-        if (@hasDecl(os, "O_LARGEFILE")) flags |= os.O_LARGEFILE;
+        if (@hasDecl(os, "O.LARGEFILE")) flags |= os.O.LARGEFILE;
 
         var direct_io_supported = false;
         if (config.direct_io) {
             direct_io_supported = try Storage.fs_supports_direct_io(dir_fd);
             if (direct_io_supported) {
-                if (!is_darwin) flags |= os.O_DIRECT;
+                if (!is_darwin) flags |= os.O.DIRECT;
             } else if (config.deployment_environment == .development) {
                 log.warn("file system does not support Direct I/O", .{});
             } else {
@@ -352,15 +355,15 @@ pub const Storage = struct {
 
         if (must_create) {
             log.info("creating \"{s}\"...", .{relative_path});
-            flags |= os.O_CREAT;
-            flags |= os.O_EXCL;
+            flags |= os.O.CREAT;
+            flags |= os.O.EXCL;
             mode = 0o666;
         } else {
             log.info("opening \"{s}\"...", .{relative_path});
         }
 
-        // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
-        assert((flags & os.O_DSYNC) > 0);
+        // This is critical as we rely on O.DSYNC for fsync() whenever we write to the file:
+        assert((flags & os.O.DSYNC) > 0);
 
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
         assert(!std.fs.path.isAbsolute(relative_path));
@@ -370,14 +373,14 @@ pub const Storage = struct {
 
         // TODO Check that the file is actually a file.
 
-        // On darwin, use F_NOCACHE on direct_io to disable the page cache as O_DIRECT doesn't exit.
+        // On darwin, use F_NOCACHE on direct_io to disable the page cache as O.DIRECT doesn't exit.
         if (is_darwin and config.direct_io and direct_io_supported) {
             _ = try os.fcntl(fd, os.F_NOCACHE, 1);
         }
 
         // Obtain an advisory exclusive lock that works only if all processes actually use flock().
         // LOCK_NB means that we want to fail the lock without waiting if another process has it.
-        os.flock(fd, os.LOCK_EX | os.LOCK_NB) catch |err| switch (err) {
+        os.flock(fd, os.LOCK.EX | os.LOCK.NB) catch |err| switch (err) {
             error.WouldBlock => @panic("another process holds the data file lock"),
             else => return err,
         };
@@ -389,7 +392,7 @@ pub const Storage = struct {
 
         // The best fsync strategy is always to fsync before reading because this prevents us from
         // making decisions on data that was never durably written by a previously crashed process.
-        // We therefore always fsync when we open the path, also to wait for any pending O_DSYNC.
+        // We therefore always fsync when we open the path, also to wait for any pending O.DSYNC.
         // Thanks to Alex Miller from FoundationDB for diving into our source and pointing this out.
         try os.fsync(fd);
 
@@ -435,7 +438,6 @@ pub const Storage = struct {
             const F_ALLOCATECONTIG = 0x2; // allocate contiguous space
             const F_ALLOCATEALL = 0x4; // allocate all or nothing
             const F_PEOFPOSMODE = 3; // use relative offset from the seek pos mode
-            const F_VOLPOSMODE = 4; // use the specified volume offset
             const fstore_t = extern struct {
                 fst_flags: c_uint,
                 fst_posmode: c_int,
@@ -460,17 +462,17 @@ pub const Storage = struct {
             }
 
             switch (os.errno(res)) {
-                0 => {},
-                os.EACCES => unreachable, // F_SETLK or F_SETSIZE of F_WRITEBOOTSTRAP
-                os.EBADF => return error.FileDescriptorInvalid,
-                os.EDEADLK => unreachable, // F_SETLKW
-                os.EINTR => unreachable, // F_SETLKW
-                os.EINVAL => return error.ArgumentsInvalid, // for F_PREALLOCATE (offset invalid)
-                os.EMFILE => unreachable, // F_DUPFD or F_DUPED
-                os.ENOLCK => unreachable, // F_SETLK or F_SETLKW
-                os.EOVERFLOW => return error.FileTooBig,
-                os.ESRCH => unreachable, // F_SETOWN
-                os.EOPNOTSUPP => return error.OperationNotSupported, // not reported but need same error union
+                .SUCCESS => {},
+                .ACCES => unreachable, // F_SETLK or F_SETSIZE of F_WRITEBOOTSTRAP
+                .BADF => return error.FileDescriptorInvalid,
+                .DEADLK => unreachable, // F_SETLKW
+                .INTR => unreachable, // F_SETLKW
+                .INVAL => return error.ArgumentsInvalid, // for F_PREALLOCATE (offset invalid)
+                .MFILE => unreachable, // F_DUPFD or F_DUPED
+                .NOLCK => unreachable, // F_SETLK or F_SETLKW
+                .OVERFLOW => return error.FileTooBig,
+                .SRCH => unreachable, // F_SETOWN
+                .OPNOTSUPP => return error.OperationNotSupported, // not reported but need same error union
                 else => |errno| return os.unexpectedErrno(errno),
             }
 
@@ -484,43 +486,43 @@ pub const Storage = struct {
         while (true) {
             const rc = os.linux.fallocate(fd, mode, offset, length);
             switch (os.linux.getErrno(rc)) {
-                0 => return,
-                os.linux.EBADF => return error.FileDescriptorInvalid,
-                os.linux.EFBIG => return error.FileTooBig,
-                os.linux.EINTR => continue,
-                os.linux.EINVAL => return error.ArgumentsInvalid,
-                os.linux.EIO => return error.InputOutput,
-                os.linux.ENODEV => return error.NoDevice,
-                os.linux.ENOSPC => return error.NoSpaceLeft,
-                os.linux.ENOSYS => return error.SystemOutdated,
-                os.linux.EOPNOTSUPP => return error.OperationNotSupported,
-                os.linux.EPERM => return error.PermissionDenied,
-                os.linux.ESPIPE => return error.Unseekable,
-                os.linux.ETXTBSY => return error.FileBusy,
+                .SUCCESS => return,
+                .BADF => return error.FileDescriptorInvalid,
+                .FBIG => return error.FileTooBig,
+                .INTR => continue,
+                .INVAL => return error.ArgumentsInvalid,
+                .IO => return error.InputOutput,
+                .NODEV => return error.NoDevice,
+                .NOSPC => return error.NoSpaceLeft,
+                .NOSYS => return error.SystemOutdated,
+                .OPNOTSUPP => return error.OperationNotSupported,
+                .PERM => return error.PermissionDenied,
+                .SPIPE => return error.Unseekable,
+                .TXTBSY => return error.FileBusy,
                 else => |errno| return os.unexpectedErrno(errno),
             }
         }
     }
 
     /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
-    /// Not all Linux file systems support `O_DIRECT`, e.g. a shared macOS volume.
+    /// Not all Linux file systems support `O.DIRECT`, e.g. a shared macOS volume.
     fn fs_supports_direct_io(dir_fd: std.os.fd_t) !bool {
-        if (!@hasDecl(std.os, "O_DIRECT") and !is_darwin) return false;
+        if (!@hasDecl(std.os, "O.DIRECT") and !is_darwin) return false;
 
         const path = "fs_supports_direct_io";
         const dir = std.fs.Dir{ .fd = dir_fd };
-        const fd = try os.openatZ(dir_fd, path, os.O_CLOEXEC | os.O_CREAT | os.O_TRUNC, 0o666);
+        const fd = try os.openatZ(dir_fd, path, os.O.CLOEXEC | os.O.CREAT | os.O.TRUNC, 0o666);
         defer os.close(fd);
         defer dir.deleteFile(path) catch {};
 
-        // F_NOCACHE on darwin is the most similar option to O_DIRECT on linux.
+        // F_NOCACHE on darwin is the most similar option to O.DIRECT on linux.
         if (is_darwin) {
             _ = os.fcntl(fd, os.F_NOCACHE, 1) catch return false;
             return true;
         }
 
         while (true) {
-            const res = os.system.openat(dir_fd, path, os.O_CLOEXEC | os.O_RDONLY | os.O_DIRECT, 0);
+            const res = os.system.openat(dir_fd, path, os.O.CLOEXEC | os.O.RDONLY | os.O.DIRECT, 0);
             switch (os.linux.getErrno(res)) {
                 0 => {
                     os.close(@intCast(os.fd_t, res));
