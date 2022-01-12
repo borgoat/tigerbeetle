@@ -1708,6 +1708,7 @@ pub fn LsmTree(
     };
 }
 
+// TODO double check how this interacts with dynamic tables sizes across levels.
 pub fn compute_table_count_max(growth_factor: u32, levels: u32) u32 {
     var table_count: u32 = 0;
     var level: u32 = 0;

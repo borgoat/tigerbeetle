@@ -8,6 +8,7 @@ const lsm = @import("tree.zig");
 const binary_search = @import("binary_search").binary_search;
 
 const Direction = @import("tree.zig").Direction;
+const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 
 fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     const T = @TypeOf(numerator, denominator);
@@ -19,51 +20,31 @@ pub fn ManifestLevel(
     comptime TableInfo: type,
     comptime compare_keys: fn (Key, Key) math.Order,
 ) type {
-    const node_size = config.lsm_manifest_node_size;
-
     return struct {
         const Self = @This();
 
-        const key_node_capacity = node_size / @sizeOf(Key);
-        const key_nodes_max = blk: {
-            // Key nodes are a segmented array where if a node
-            // fills up it is divided into two new nodes. Therefore,
-            // the worst possible space overhead is when all key nodes
-            // are half full.
-            const min_keys_per_node = key_node_capacity / 2;
-            // TODO Can we get rid of this +1?
-            break :blk div_ceil(lsm.table_count_max, min_keys_per_node) + 1;
-        };
+        const Keys = SegmentedArray(Key, node_size, lsm.table_count_max);
+        const Tables = SegmentedArray(TableInfo, node_size, lsm.table_count_max);
 
-        const table_node_capacity = node_size / @sizeOf(TableInfo);
-        const table_nodes_max = blk: {
-            // Info nodes are a segmented array where if a node
-            // fills up it is divided into two new nodes. Therefore,
-            // the worst possible space overhead is when all table nodes
-            // are half full.
-            const min_tables_per_node = table_node_capacity / 2;
-            // TODO Can we get rid of this +1?
-            break :blk div_ceil(lsm.table_count_max, min_tables_per_node) + 1;
-        };
+        /// The minimum key of each key node in the keys segmented array.
+        /// This is the starting point of our tiered lookup approach.
+        /// Only the first keys.node_count elements are valid.
+        root_keys_array: *[Keys.node_count_max]Key,
+        /// This is the index of the table node containing the TableInfo corresponding to a given
+        /// root key. This allows us to skip table nodes which cannot contain the target TableInfo
+        /// when searching for the TableInfo with a given absolute index.
+        root_table_nodes_array: *[Keys.node_count_max]u32,
 
-        key_node_count: u32,
-        key_node_key_min: *[key_nodes_max]Key,
-        key_node_pointer: *[key_nodes_max]?*[key_node_capacity]Key,
-        // TODO Get rid of this as it is redundant with key_node_start_index
-        key_node_counts: *[key_nodes_max]u32,
-        key_node_start_index: *[key_nodes_max]u32,
-        key_node_key_min_table_node: *[key_nodes_max]u32,
-
-        table_node_count: u32,
-        table_node_pointer: *[table_nodes_max]?*[table_node_capacity]TableInfo,
-        // TODO Get rid of this as it is redundant with table_node_start_index
-        table_node_counts: *[table_nodes_max]u32,
-        table_node_start_index: *[table_nodes_max]u32,
+        // These two segmented arrays are parallel. That is, the absolute indexes of key and
+        // corresponding TableInfo are the same. However, the number of nodes, node index, and
+        // relative index into the node differ as the elements per node are different.
+        keys: Keys,
+        tables: Tables,
 
         fn init(allocator: *mem.Allocator, level: u8) !Self {}
 
         pub const Iterator = struct {
-            level: *Self,
+            level: *const Self,
 
             node: u32,
             /// The index inside the current table node.
@@ -76,7 +57,7 @@ pub fn ManifestLevel(
             key_max: Key,
             direction: Direction,
 
-            pub fn next(it: *Iterator) ?*TableInfo {
+            pub fn next(it: *Iterator) ?*const TableInfo {
                 {
                     assert(direction == .ascending);
                     if (it.node >= it.level.table_node_count) return null;
@@ -118,7 +99,7 @@ pub fn ManifestLevel(
         };
 
         pub fn iterate(
-            level: *Self,
+            level: *const Self,
             /// May pass math.maxInt(u64) if there is no snapshot.
             snapshot: u64,
             key_min: Key,
@@ -128,24 +109,32 @@ pub fn ManifestLevel(
             // TODO handle descending direction
             assert(direction == .ascending);
 
-            const key_node = binary_search(level.key_node_key_min, key_min);
-            // TODO think through out of bounds/negative lookup/etc.
-            const keys = level.key_node_pointer[key_node][0..level.key_node_counts[key_node]];
-            const index = level.key_node_start_index[key_node] + binary_search(keys, key_min);
-
-            var table_node = level.key_node_key_min_table_node[key_node];
-            while (table_node + 1 < level.table_node_count and
-                level.table_node_start_index[table_node + 1] <= index)
-            {
-                table_node += 1;
+            if (level.root_keys().len == 0) {
+                // TODO return empty iterator
+                unreachable;
             }
-            const relative_index = index - level.table_node_start_index[table_node];
+
+            const key_node = binary_search(level.root_keys(), key_min);
+            if (key_node >= level.keys.node_count) {
+                // TODO return empty iterator
+                unreachable;
+            }
+
+            // TODO think through out of bounds/negative lookup/etc.
+            const keys = level.keys.node_elements(key_node);
+            const relative_index = binary_search(keys, key_min);
+            if (relative_index >= keys.len) {
+                // TODO return empty iterator
+                unreachable;
+            }
+            const index = level.keys.absolute_index(key_node, relative_index);
+
+            const start_node = level.root_table_nodes()[key_node];
 
             return .{
                 .level = level,
 
-                .table_node = table_node,
-                .relative_index = relative_index,
+                .iterator = level.tables.iterator(index, start_node, direction),
 
                 .snapshot = snapshot,
                 .key_min = key_min,
@@ -154,7 +143,13 @@ pub fn ManifestLevel(
             };
         }
 
-        fn binary_search(keys: []const Key, key: Key) usize {
+        const BinarySearchResult = struct {
+            index: usize,
+            exact: bool,
+        };
+
+        // TODO move this back to binary_search.zig and allow max key searching.
+        fn binary_search(keys: []const Key, key: Key) BinarySearchResult {
             assert(keys.len > 0);
 
             var offset: usize = 0;
@@ -170,8 +165,19 @@ pub fn ManifestLevel(
 
                 length -= half;
             }
+            const exact = compare_keys(keys[offset], key) == .eq;
+            return .{
+                .index = offset + @boolToInt(!exact),
+                .exact = exact,
+            };
+        }
 
-            return offset + @boolToInt(compare_keys(keys[offset], key) == .lt);
+        fn root_keys(level: Self) []Key {
+            return level.root_keys_array[0..level.keys.node_count];
+        }
+
+        fn root_table_nodes(level: Self) []u32 {
+            return level.root_table_nodes_array[0..level.keys.node_count];
         }
     };
 }

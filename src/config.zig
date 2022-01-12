@@ -200,6 +200,7 @@ pub const lsm_table_size_max = 64 * 1024 * 1024;
 pub const lsm_table_block_size = 64 * 1024;
 
 /// Size of nodes used by the LSM tree manifest implementation.
+/// TODO double check this with our "LSM Manifest" spreadsheet
 pub const lsm_manifest_node_size = 16 * 1024;
 
 pub const lsm_mutable_table_size_max = 4 * message_size_max;
