@@ -45,60 +45,37 @@ pub fn ManifestLevel(
 
         pub const Iterator = struct {
             level: *const Self,
-
-            node: u32,
-            /// The index inside the current table node.
-            index: u32,
+            inner: Tables.Iterator,
 
             /// May pass math.maxInt(u64)-1 if there is no snapshot.
             snapshot: u64,
-
             key_min: Key,
             key_max: Key,
             direction: Direction,
 
             pub fn next(it: *Iterator) ?*const TableInfo {
-                {
-                    assert(direction == .ascending);
-                    if (it.node >= it.level.table_node_count) return null;
-                }
-
-                const tables_len = it.level.table_node_count[it.node];
-                const tables = it.level.table_node_pointer[it.node][0..tables_len];
-
-                const table_info = &tables[it.index];
+                const table_info = it.inner.next() orelse return null;
 
                 switch (direction) {
                     .ascending => {
-                        assert(compare_keys(table_info.key_min, it.key_min) != .lt);
                         if (compare_keys(table_info.key_min, it.key_max) == .gt) {
-                            // Set this to ensure that next() continues to return null if called again.
-                            it.node = it.level.table_node_count;
+                            inner.done = true;
                             return null;
                         }
                     },
                     .descending => {
-                        assert(compare_keys(table_info.key_max, it.key_max) != .gt);
                         if (compare_keys(table_info.key_max, it.key_min) == .lt) {
-                            // Set this to ensure that next() continues to return null if called again.
-                            it.node = 0;
+                            inner.done = true;
                             return null;
                         }
                     },
-                }
-
-                it.index += 1;
-                if (it.index >= tables.len) {
-                    assert(direction == .ascending);
-                    it.index = 0;
-                    it.node += 1;
                 }
 
                 return table_info;
             }
         };
 
-        pub fn iterate(
+        pub fn iterator(
             level: *const Self,
             /// May pass math.maxInt(u64) if there is no snapshot.
             snapshot: u64,
@@ -106,41 +83,108 @@ pub fn ManifestLevel(
             key_max: Key,
             direction: Direction,
         ) Iterator {
-            // TODO handle descending direction
-            assert(direction == .ascending);
+            const inner = blk: {
+                const key = switch (direction) {
+                    .ascending => key_min,
+                    .descending => key_max,
+                };
+                if (level.iterator_start(key)) |start| {
+                    // TODO move this code to a helper for iterator_start()
+                    const reverse = level.keys.iterator(
+                        level.keys.absolute_index(start.key_node, start.relative_index),
+                        start.key_node,
+                        direction.reverse(),
+                    );
 
-            if (level.root_keys().len == 0) {
-                // TODO return empty iterator
-                unreachable;
-            }
+                    var adjusted = start;
+                    assert(adjusted.key_node == reverse.key_node);
+                    assert(adjusted.relative_index == reverse.relative_index);
 
-            const key_node = binary_search(level.root_keys(), key_min);
-            if (key_node >= level.keys.node_count) {
-                // TODO return empty iterator
-                unreachable;
-            }
+                    const start_key = reverse.next().?;
+                    var next_adjusted = adjusted;
+                    next_adjusted.key_node = reverse.key_node;
+                    next_adjusted.relative_index = reverse.relative_index;
+                    while (reverse.next()) |k| {
+                        if (compare_keys(start_key, k) != .eq) break;
+                        adjusted = next_adjusted;
+                        next_adjusted.key_node = reverse.key_node;
+                        next_adjusted.relative_index = reverse.relative_index;
+                    }
+                    // TODO add assertions
 
-            // TODO think through out of bounds/negative lookup/etc.
-            const keys = level.keys.node_elements(key_node);
-            const relative_index = binary_search(keys, key_min);
-            if (relative_index >= keys.len) {
-                // TODO return empty iterator
-                unreachable;
-            }
-            const index = level.keys.absolute_index(key_node, relative_index);
-
-            const start_node = level.root_table_nodes()[key_node];
+                    break :blk level.keys.iterator(
+                        level.keys.absolute_index(adjusted.key_node, adjusted.relative_index),
+                        start.key_node,
+                        direction,
+                    );
+                } else {
+                    break :blk Tables.Iterator{
+                        .array = undefined,
+                        .direction = undefined,
+                        .node = undefined,
+                        .relative_index = undefined,
+                        .done = true,
+                    };
+                }
+            };
 
             return .{
                 .level = level,
-
-                .iterator = level.tables.iterator(index, start_node, direction),
-
+                .inner = inner,
                 .snapshot = snapshot,
                 .key_min = key_min,
                 .key_max = key_max,
                 .direction = direction,
             };
+        }
+
+        const Start = struct {
+            key_node: u32,
+            relative_index: u32,
+        };
+
+        // TODO add doc comments, this is pretty tricky
+        fn iterator_start(level: Self, key: Key) ?Start {
+            const root = level.root_keys();
+            if (root.len == 0) return null;
+
+            const root_result = binary_search(root, key);
+            if (root_result.exact) {
+                return .{
+                    .key_node = root_result.index,
+                    .relative_index = 0,
+                };
+            } else if (root_result.index == 0) {
+                // Out of bounds to the left, so start the search at the first table in the
+                // level in the case of an ascending search. This is not strictly necessary
+                // in the case of a descending search, but it allows us to have a single code
+                // path for ascending and descending searches.
+                return .{
+                    .key_node = 0,
+                    .relative_index = 0,
+                };
+            } else {
+                const key_node = root_result.index - 1;
+
+                const keys = level.keys.node_elements(key_node);
+                const keys_result = binary_search(keys, key);
+
+                // Since we didn't have an exact match in the previous binary search, and since
+                // we've already handled the case of being out of bounds to the left with an
+                // early return, we know that the target key_min is strictly greater than the
+                // first key in the key node.
+                assert(keys_result.index != 0);
+
+                return .{
+                    .key_node = key_node,
+                    .relative_index = keys_result.index - @boolToInt(!keys_result.exact),
+                };
+            }
+        }
+
+        inline fn iterator_start_table_node_for_key_node(level: Self, key_node: u32) u32 {
+            assert(key_node < level.keys.node_count);
+            return level.root_table_nodes_array[key_node];
         }
 
         const BinarySearchResult = struct {
@@ -172,12 +216,8 @@ pub fn ManifestLevel(
             };
         }
 
-        fn root_keys(level: Self) []Key {
+        inline fn root_keys(level: Self) []Key {
             return level.root_keys_array[0..level.keys.node_count];
-        }
-
-        fn root_table_nodes(level: Self) []u32 {
-            return level.root_table_nodes_array[0..level.keys.node_count];
         }
     };
 }

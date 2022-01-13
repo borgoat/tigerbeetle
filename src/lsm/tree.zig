@@ -129,6 +129,13 @@ pub fn BlockStorage(comptime Storage: type) type {
 pub const Direction = enum {
     ascending,
     descending,
+
+    pub fn reverse(d: Direction) Direction {
+        return switch (d) {
+            .ascending => .descending,
+            .descending => .ascending,
+        };
+    }
 };
 
 pub const table_count_max = compute_table_count_max(config.lsm_growth_factor, config.levels);
@@ -162,8 +169,11 @@ pub fn LsmTree(
                 checksum: u128,
                 address: u64,
 
-                timestamp_created: u64,
-                timestamp_deleted: u64,
+                /// Set to the current snapshot tick on creation.
+                snapshot_min: u64,
+                /// Initially math.maxInt(u64) on creation, set to the current
+                /// snapshot tick on deletion.
+                snapshot_max: u64,
 
                 key_min: Key,
                 key_max: Key,

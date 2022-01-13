@@ -56,7 +56,9 @@ pub fn SegmentedArray(
             node: u32,
             relative_index: u32,
 
-            done: bool,
+            /// The user may set this early to stop iteration. For example,
+            /// if the returned table info is outside the key range.
+            done: bool = false,
 
             pub fn next(it: *Iterator) ?*const T {
                 if (it.done) return null;
@@ -106,7 +108,11 @@ pub fn SegmentedArray(
             start_node: u32,
             direction: Direction,
         ) Iterator {
+            // By asserting that the absolute index and start node are in bounds, we know that
+            // the iterator will not be initialized in the `done` state and will yield at least
+            // one element.
             assert(start_node < array.node_count);
+            assert(absolute_index <= array.last_absolute_index(array.node_count - 1));
             switch (direction) {
                 .ascending => {
                     assert(absolute_index >= array.first_absolute_index(start_node));
@@ -120,7 +126,9 @@ pub fn SegmentedArray(
                     assert(node < array.node_count);
 
                     const relative_index = absolute_index - array.first_absolute_index(node);
+                    assert(relative_index < array.counts[node]);
 
+                    // TODO dead code:
                     const done = relative_index >= array.counts[node];
                     if (done) assert(node + 1 == array.node_count);
 
@@ -129,7 +137,6 @@ pub fn SegmentedArray(
                         .direction = direction,
                         .node = node,
                         .relative_index = relative_index,
-                        .done = done,
                     };
                 },
                 .descending => {
@@ -141,7 +148,9 @@ pub fn SegmentedArray(
                     }
 
                     const relative_index = absolute_index - array.first_absolute_index(node);
+                    assert(relative_index < array.counts[node]);
 
+                    // TODO dead code:
                     const done = relative_index >= array.counts[node];
                     if (done) assert(node + 1 == array.node_count);
 
@@ -150,7 +159,6 @@ pub fn SegmentedArray(
                         .direction = direction,
                         .node = node,
                         .relative_index = relative_index,
-                        .done = done,
                     };
                 },
             }
