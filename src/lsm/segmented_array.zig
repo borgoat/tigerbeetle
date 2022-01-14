@@ -4,6 +4,11 @@ const mem = std.mem;
 
 const Direction = @import("tree.zig").Direction;
 
+pub const SegmentedArrayCursor = struct {
+    node: u32,
+    relative_index: u32,
+};
+
 pub fn SegmentedArray(
     comptime T: type,
     comptime node_size: u32,
@@ -42,8 +47,12 @@ pub fn SegmentedArray(
             return array.nodes[node].?[0..array.counts[node]];
         }
 
+        pub fn element(array: Self, cursor: SegmentedArrayCursor) T {
+            return array.node_elements(cursor.node)[cursor.relative_index];
+        }
+
         // TODO consider enabling ReleaseFast for this once tested
-        pub fn absolute_index(array: Self, node: u32, relative_index: u32) u32 {
+        pub fn absolute_index_for_cursor(array: Self, cursor: SegmentedArrayCursor) u32 {
             assert(node < array.node_count);
             assert(relative_index < array.counts[node]);
             return array.first_absolute_index(node) + relative_index;
@@ -53,8 +62,7 @@ pub fn SegmentedArray(
             array: *const Self,
             direction: Direction,
 
-            node: u32,
-            relative_index: u32,
+            cursor: SegmentedArrayCursor,
 
             /// The user may set this early to stop iteration. For example,
             /// if the returned table info is outside the key range.
@@ -63,35 +71,35 @@ pub fn SegmentedArray(
             pub fn next(it: *Iterator) ?*const T {
                 if (it.done) return null;
 
-                assert(it.relative_index < elements.len);
-                assert(it.node < it.array.node_count);
+                assert(it.cursor.relative_index < elements.len);
+                assert(it.cursor.node < it.array.node_count);
 
-                const elements = it.array.node_elements(it.node);
-                const element = &elements[it.relative_index];
+                const elements = it.array.node_elements(it.cursor.node);
+                const element = &elements[it.cursor.relative_index];
 
                 switch (it.direction) {
                     .ascending => {
-                        if (it.relative_index == elements.len - 1) {
-                            if (it.node == it.array.node_count - 1) {
+                        if (it.cursor.relative_index == elements.len - 1) {
+                            if (it.cursor.node == it.array.node_count - 1) {
                                 it.done = true;
                             } else {
-                                it.node += 1;
-                                it.relative_index = 0;
+                                it.cursor.node += 1;
+                                it.cursor.relative_index = 0;
                             }
                         } else {
-                            it.relative_index += 1;
+                            it.cursor.relative_index += 1;
                         }
                     },
                     .descending => {
-                        if (it.relative_index == 0) {
-                            if (it.node == 0) {
+                        if (it.cursor.relative_index == 0) {
+                            if (it.cursor.node == 0) {
                                 it.done = true;
                             } else {
-                                it.node -= 1;
-                                it.relative_index = it.array.counts[node] - 1;
+                                it.cursor.node -= 1;
+                                it.cursor.relative_index = it.array.counts[node] - 1;
                             }
                         } else {
-                            it.relative_index -= 1;
+                            it.cursor.relative_index -= 1;
                         }
                     },
                 }
@@ -104,7 +112,9 @@ pub fn SegmentedArray(
             array: *const Self,
             /// Absolute index to start iteration at.
             absolute_index: u32,
-            /// This just allows us to skip over nodes as an optimization.
+            /// The start node allows us to skip over nodes as an optimization.
+            /// If ascending start from the first element of the start node and ascend.
+            /// If descending start from the last element of the start node and descend.
             start_node: u32,
             direction: Direction,
         ) Iterator {
@@ -135,8 +145,10 @@ pub fn SegmentedArray(
                     return .{
                         .array = array,
                         .direction = direction,
-                        .node = node,
-                        .relative_index = relative_index,
+                        .cursor = .{
+                            .node = node,
+                            .relative_index = relative_index,
+                        },
                     };
                 },
                 .descending => {
@@ -157,8 +169,10 @@ pub fn SegmentedArray(
                     return .{
                         .array = array,
                         .direction = direction,
-                        .node = node,
-                        .relative_index = relative_index,
+                        .cursor = .{
+                            .node = node,
+                            .relative_index = relative_index,
+                        },
                     };
                 },
             }

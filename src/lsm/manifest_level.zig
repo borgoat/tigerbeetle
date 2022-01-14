@@ -9,6 +9,7 @@ const binary_search = @import("binary_search").binary_search;
 
 const Direction = @import("tree.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
+const SegmentedArrayCursor = @import("segmented_array.zig").SegmentedArrayCursor;
 
 fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     const T = @TypeOf(numerator, denominator);
@@ -54,24 +55,37 @@ pub fn ManifestLevel(
             direction: Direction,
 
             pub fn next(it: *Iterator) ?*const TableInfo {
-                const table_info = it.inner.next() orelse return null;
+                while (it.inner.next()) |table_info| {
+                    // check snapshot or continue
 
-                switch (direction) {
-                    .ascending => {
-                        if (compare_keys(table_info.key_min, it.key_max) == .gt) {
-                            inner.done = true;
-                            return null;
-                        }
-                    },
-                    .descending => {
-                        if (compare_keys(table_info.key_max, it.key_min) == .lt) {
-                            inner.done = true;
-                            return null;
-                        }
-                    },
+                    switch (direction) {
+                        .ascending => {
+                            // Unlike in the descending case, it is not guaranteed that
+                            // table_info.key_max is less than it.key_min on the first iteration
+                            // as only the key_min of a table is stored in our root/key nodes.
+                            // On subsequent iterations this check will always be true.
+                            if (compare_keys(table_info.key_max, it.key_min) == .lt or
+                                compare_keys(table_info.key_min, it.key_max) == .gt)
+                            {
+                                inner.done = true;
+                                return null;
+                            }
+                        },
+                        .descending => {
+                            // We can assert this as it is exactly the same key comparison we
+                            // perform when doing binary search in iterator_start(), and since
+                            // we move in descending order this remains true beyond the first
+                            // iteration.
+                            assert(compare_keys(table_info.key_min, it.key_max) != .gt);
+                            if (compare_keys(table_info.key_max, it.key_min) == .lt) {
+                                inner.done = true;
+                                return null;
+                            }
+                        },
+                    }
+
+                    return table_info;
                 }
-
-                return table_info;
             }
         };
 
@@ -84,37 +98,10 @@ pub fn ManifestLevel(
             direction: Direction,
         ) Iterator {
             const inner = blk: {
-                const key = switch (direction) {
-                    .ascending => key_min,
-                    .descending => key_max,
-                };
-                if (level.iterator_start(key)) |start| {
-                    // TODO move this code to a helper for iterator_start()
-                    const reverse = level.keys.iterator(
-                        level.keys.absolute_index(start.key_node, start.relative_index),
-                        start.key_node,
-                        direction.reverse(),
-                    );
-
-                    var adjusted = start;
-                    assert(adjusted.key_node == reverse.key_node);
-                    assert(adjusted.relative_index == reverse.relative_index);
-
-                    const start_key = reverse.next().?;
-                    var next_adjusted = adjusted;
-                    next_adjusted.key_node = reverse.key_node;
-                    next_adjusted.relative_index = reverse.relative_index;
-                    while (reverse.next()) |k| {
-                        if (compare_keys(start_key, k) != .eq) break;
-                        adjusted = next_adjusted;
-                        next_adjusted.key_node = reverse.key_node;
-                        next_adjusted.relative_index = reverse.relative_index;
-                    }
-                    // TODO add assertions
-
+                if (level.iterator_start(key, direction)) |start| {
                     break :blk level.keys.iterator(
-                        level.keys.absolute_index(adjusted.key_node, adjusted.relative_index),
-                        start.key_node,
+                        level.keys.absolute_index_for_cursor(start),
+                        level.iterator_start_table_node_for_key_node(start.node, direction),
                         direction,
                     );
                 } else {
@@ -138,33 +125,57 @@ pub fn ManifestLevel(
             };
         }
 
-        const Start = struct {
-            key_node: u32,
-            relative_index: u32,
-        };
-
-        // TODO add doc comments, this is pretty tricky
-        fn iterator_start(level: Self, key: Key) ?Start {
+        /// Returns the table segmented array cursor at which iteration should be started.
+        /// May return null if there is nothing to iterate because we know for sure that the key
+        /// range is disjoint with the tables stored in this level.
+        /// However, the cursor returned is not guaranteed to be in range for the query as only
+        /// the key_min is stored in the index structures, not the key_max.
+        fn iterator_start(
+            level: Self,
+            key_min: Key,
+            key_max: Key,
+            direction: Direction,
+        ) ?SegmentedArrayCursor {
             const root = level.root_keys();
             if (root.len == 0) return null;
 
+            const key = switch (direction) {
+                .ascending => key_min,
+                .descending => key_max,
+            };
+
             const root_result = binary_search(root, key);
             if (root_result.exact) {
-                return .{
-                    .key_node = root_result.index,
-                    .relative_index = 0,
-                };
+                return level.iterator_start_boundary(
+                    .{
+                        .node = root_result.index,
+                        .relative_index = 0,
+                    },
+                    direction,
+                );
             } else if (root_result.index == 0) {
-                // Out of bounds to the left, so start the search at the first table in the
-                // level in the case of an ascending search. This is not strictly necessary
-                // in the case of a descending search, but it allows us to have a single code
-                // path for ascending and descending searches.
-                return .{
-                    .key_node = 0,
-                    .relative_index = 0,
-                };
+                // Out of bounds to the left.
+                switch (direction) {
+                    // In the case of an ascending search, we start at the first table in the level
+                    // since the target key_min is less than the key_min of the first table.
+                    .ascending => return .{
+                        .node = 0,
+                        .relative_index = 0,
+                    },
+                    // In the case of a descending search, we are already finished because the first
+                    // key_min in the entire level is greater than the target key_max.
+                    .descending => return null,
+                }
             } else {
+                // Since there was not an exact match, the binary search returns the index of
+                // the next greatest key. We must therefore subtract one to perform the next
+                // binary search in the key node which may contain `key`.
                 const key_node = root_result.index - 1;
+                // In the rather unlikely event that two or more key_nodes share the same key_min
+                // a simple root_result.index - 1 isn't sufficient to get to the next lowest key_min,
+                // unless our binary search implementation guarantees to always return the immediate
+                // next greatest key even in the presence of duplicates, which it does.
+                assert(compare_keys(root[key_node], root[root_result.index]) == .lt);
 
                 const keys = level.keys.node_elements(key_node);
                 const keys_result = binary_search(keys, key);
@@ -175,15 +186,69 @@ pub fn ManifestLevel(
                 // first key in the key node.
                 assert(keys_result.index != 0);
 
-                return .{
-                    .key_node = key_node,
-                    .relative_index = keys_result.index - @boolToInt(!keys_result.exact),
-                };
+                // In the case of an inexact match, the binary search returns the index of
+                // the next greatest key. We must therefore subtract one as it is possible for
+                // the previous table to contain `key`. That is, the key_max of the previous
+                // table could be greater than `key`.
+                const relative_index = keys_result.index - @boolToInt(!keys_result.exact);
+
+                return level.iterator_start_boundary(
+                    .{
+                        .node = key_node,
+                        .relative_index = relative_index,
+                    },
+                    direction,
+                );
             }
         }
 
-        inline fn iterator_start_table_node_for_key_node(level: Self, key_node: u32) u32 {
+        fn iterator_start_boundary(
+            level: Self,
+            key_cursor: SegmentedArrayCursor,
+            direction: Direction,
+        ) SegmentedArrayCursor {
+            const it = level.keys.iterator(
+                level.keys.absolute_index_for_cursor(key_cursor),
+                key_cursor.node,
+                direction.reverse(),
+            );
+
+            assert(std.meta.eql(it.cursor, key_cursor));
+            // This cursor will always point to a key equal to start_key.
+            var adjusted = reverse.cursor;
+            const start_key = reverse.next().?;
+            assert(compare_keys(start_key, level.keys.element(adjusted)) == .eq);
+
+            var adjusted_next = reverse.cursor;
+            while (reverse.next()) |k| {
+                if (compare_keys(start_key, k) != .eq) break;
+                adjusted = adjusted_next;
+                adjusted_next = reverse.cursor;
+            }
+            assert(compare_keys(start_key, level.keys.element(adjusted)) == .eq);
+
+            return adjusted;
+        }
+
+        inline fn iterator_start_table_node_for_key_node(
+            level: Self,
+            key_node: u32,
+            direction: Direction,
+        ) u32 {
             assert(key_node < level.keys.node_count);
+
+            if (direction == .descending) {
+                // Since the corresponding table node in the root_table_nodes_array is a lower
+                // bound, we need to add one to make it an upper bound when descending.
+                key_node += 1;
+
+                if (key_node == level.keys.node_count) {
+                    // If we were already at the last key node, then we
+                    // should instead return the very last table node.
+                    return level.tables.node_count - 1;
+                }
+            }
+
             return level.root_table_nodes_array[key_node];
         }
 
