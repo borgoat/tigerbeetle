@@ -16,6 +16,8 @@ pub const IO = struct {
     io_pending: FIFO(Completion) = .{},
 
     pub fn init(entries: u12, flags: u32) !IO {
+        _ = entries;
+        _ = flags;
         const kq = try os.kqueue();
         assert(kq > -1);
         return IO{ .kq = kq };
@@ -44,6 +46,8 @@ pub const IO = struct {
                 _completion: *Completion,
                 _result: TimeoutError!void,
             ) void {
+                _ = _completion;
+                _ = _result;
                 timed_out_ptr.* = true;
             }
         }.callback;
@@ -123,25 +127,25 @@ pub const IO = struct {
         }
     }
 
-    fn flush_io(self: *IO, events: []os.Kevent, io_pending_top: *?*Completion) usize {
+    fn flush_io(_: *IO, events: []os.Kevent, io_pending_top: *?*Completion) usize {
         for (events) |*event, flushed| {
             const completion = io_pending_top.* orelse return flushed;
             io_pending_top.* = completion.next;
 
             const event_info = switch (completion.operation) {
-                .accept => |op| [2]c_int{ op.socket, os.EVFILT_READ },
-                .connect => |op| [2]c_int{ op.socket, os.EVFILT_WRITE },
-                .read => |op| [2]c_int{ op.fd, os.EVFILT_READ },
-                .write => |op| [2]c_int{ op.fd, os.EVFILT_WRITE },
-                .recv => |op| [2]c_int{ op.socket, os.EVFILT_READ },
-                .send => |op| [2]c_int{ op.socket, os.EVFILT_WRITE },
+                .accept => |op| [2]c_int{ op.socket, os.E.VFILT.READ },
+                .connect => |op| [2]c_int{ op.socket, os.E.VFILT.WRITE },
+                .read => |op| [2]c_int{ op.fd, os.E.VFILT.READ },
+                .write => |op| [2]c_int{ op.fd, os.E.VFILT.WRITE },
+                .recv => |op| [2]c_int{ op.socket, os.E.VFILT.READ },
+                .send => |op| [2]c_int{ op.socket, os.E.VFILT.WRITE },
                 else => @panic("invalid completion operation queued for io"),
             };
 
             event.* = .{
                 .ident = @intCast(u32, event_info[0]),
                 .filter = @intCast(i16, event_info[1]),
-                .flags = os.EV_ADD | os.EV_ENABLE | os.EV_ONESHOT,
+                .flags = os.E.V.ADD | os.E.V.ENABLE | os.E.V.ONESHOT,
                 .fflags = 0,
                 .data = 0,
                 .udata = @ptrToInt(completion),
@@ -181,7 +185,7 @@ pub const IO = struct {
     /// This struct holds the data needed for a single IO operation
     pub const Completion = struct {
         next: ?*Completion,
-        context: ?*c_void,
+        context: ?*anyopaque,
         callback: fn (*IO, *Completion) void,
         operation: Operation,
     };
@@ -309,16 +313,16 @@ pub const IO = struct {
                         op.socket,
                         null,
                         null,
-                        os.SOCK_NONBLOCK | os.SOCK_CLOEXEC,
+                        os.SOCK.NONBLOCK | os.SOCK.CLOEXEC,
                     );
                     errdefer os.close(fd);
 
-                    // Darwin doesn't support os.MSG_NOSIGNAL to avoid getting SIGPIPE on socket send().
+                    // Darwin doesn't support os.MSG.NOSIGNAL to avoid getting SIGPIPE on socket send().
                     // Instead, it uses the SO_NOSIGPIPE socket option which does the same for all send()s.
                     os.setsockopt(
                         fd,
-                        os.SOL_SOCKET,
-                        os.SO_NOSIGPIPE,
+                        os.SOL.SOCKET,
+                        os.SO.NOSIGPIPE,
                         &mem.toBytes(@as(c_int, 1)),
                     ) catch |err| return switch (err) {
                         error.TimeoutTooBig => unreachable,
@@ -365,9 +369,9 @@ pub const IO = struct {
                 fn doOperation(op: anytype) CloseError!void {
                     return switch (os.errno(os.system.close(op.fd))) {
                         0 => {},
-                        os.EBADF => error.FileDescriptorInvalid,
-                        os.EINTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
-                        os.EIO => error.InputOutput,
+                        os.E.BADF => error.FileDescriptorInvalid,
+                        os.E.INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
+                        os.E.IO => error.InputOutput,
                         else => |errno| os.unexpectedErrno(errno),
                     };
                 }
@@ -440,7 +444,7 @@ pub const IO = struct {
             },
             struct {
                 fn doOperation(op: anytype) FsyncError!void {
-                    _ = os.fcntl(op.fd, os.F_FULLFSYNC, 1) catch return os.fsync(op.fd);
+                    _ = os.fcntl(op.fd, os.F.FULLFSYNC, 1) catch return os.fsync(op.fd);
                 }
             },
         );
@@ -493,19 +497,19 @@ pub const IO = struct {
                         );
                         return switch (os.errno(rc)) {
                             0 => @intCast(usize, rc),
-                            os.EINTR => continue,
-                            os.EAGAIN => error.WouldBlock,
-                            os.EBADF => error.NotOpenForReading,
-                            os.ECONNRESET => error.ConnectionResetByPeer,
-                            os.EFAULT => unreachable,
-                            os.EINVAL => error.Alignment,
-                            os.EIO => error.InputOutput,
-                            os.EISDIR => error.IsDir,
-                            os.ENOBUFS => error.SystemResources,
-                            os.ENOMEM => error.SystemResources,
-                            os.ENXIO => error.Unseekable,
-                            os.EOVERFLOW => error.Unseekable,
-                            os.ESPIPE => error.Unseekable,
+                            os.E.INTR => continue,
+                            os.E.AGAIN => error.WouldBlock,
+                            os.E.BADF => error.NotOpenForReading,
+                            os.E.CONNRESET => error.ConnectionResetByPeer,
+                            os.E.FAULT => unreachable,
+                            os.E.INVAL => error.Alignment,
+                            os.E.IO => error.InputOutput,
+                            os.E.ISDIR => error.IsDir,
+                            os.E.NOBUFS => error.SystemResources,
+                            os.E.NOMEM => error.SystemResources,
+                            os.E.NXIO => error.Unseekable,
+                            os.E.OVERFLOW => error.Unseekable,
+                            os.E.SPIPE => error.Unseekable,
                             else => |err| os.unexpectedErrno(err),
                         };
                     }
@@ -646,11 +650,11 @@ pub const IO = struct {
     }
 
     pub fn openSocket(family: u32, sock_type: u32, protocol: u32) !os.socket_t {
-        const fd = try os.socket(family, sock_type | os.SOCK_NONBLOCK, protocol);
+        const fd = try os.socket(family, sock_type | os.SOCK.NONBLOCK, protocol);
         errdefer os.close(fd);
 
-        // darwin doesn't support os.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
-        try os.setsockopt(fd, os.SOL_SOCKET, os.SO_NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
+        // darwin doesn't support os.MSG.NOSIGNAL, but instead a socket option to avoid SIGPIPE.
+        try os.setsockopt(fd, os.SOL.SOCKET, os.SO.NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
         return fd;
     }
 };

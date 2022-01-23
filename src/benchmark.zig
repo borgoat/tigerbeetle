@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 const config = @import("config.zig");
@@ -65,13 +66,13 @@ pub fn main() !void {
     const stdout = std.io.getStdOut().writer();
     const stderr = std.io.getStdErr().writer();
 
-    if (std.builtin.mode != .ReleaseSafe and std.builtin.mode != .ReleaseFast) {
+    if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
         try stderr.print("Benchmark must be built as ReleaseSafe for minimum performance.\n", .{});
     }
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    const allocator = arena.allocator();
 
     const client_id = std.crypto.random.int(u128);
     const cluster_id: u32 = 0;
@@ -254,7 +255,7 @@ const TimedQueue = struct {
     pub fn lap(user_data: u128, operation: Operation, results: Client.Error![]const u8) void {
         const now = std.time.milliTimestamp();
         const value = results catch |err| {
-            log.emerg("Client returned error={o}", .{@errorName(err)});
+            log.err("Client returned error={o}", .{@errorName(err)});
             @panic("Client returned error during benchmarking.");
         };
 

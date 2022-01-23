@@ -103,7 +103,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
         replicas: []u8,
         stability: u32,
 
-        pub fn init(allocator: *std.mem.Allocator, options: PacketSimulatorOptions) !Self {
+        pub fn init(allocator: std.mem.Allocator, options: PacketSimulatorOptions) !Self {
             assert(options.one_way_delay_mean >= options.one_way_delay_min);
             var self = Self{
                 .paths = try allocator.alloc(
@@ -129,7 +129,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
 
             for (self.paths) |*queue| {
                 queue.* = std.PriorityQueue(Data).init(allocator, Self.order_packets);
-                try queue.ensureCapacity(options.path_maximum_capacity);
+                try queue.ensureTotalCapacity(options.path_maximum_capacity);
             }
 
             for (self.path_clogged_till) |*clogged_till| {
@@ -139,7 +139,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
             return self;
         }
 
-        pub fn deinit(self: *Self, allocator: *std.mem.Allocator) void {
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             for (self.paths) |*queue| {
                 while (queue.popOrNull()) |*data| data.packet.deinit();
                 queue.deinit();
@@ -162,7 +162,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
         }
 
         pub fn path_queue(self: *Self, path: Path) *std.PriorityQueue(Data) {
-            var index = self.path_index(path);
+            // var index = self.path_index(path);
             return &self.paths[@as(usize, path.source) * self.options.node_count + path.target];
         }
 
@@ -171,6 +171,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
         }
 
         fn should_clog(self: *Self, path: Path) bool {
+            _ = path;
             return self.prng.random.uintAtMost(u8, 100) < self.options.path_clog_probability;
         }
 
@@ -279,12 +280,12 @@ pub fn PacketSimulator(comptime Packet: type) type {
                 if (self.is_partitioned) {
                     if (self.should_unpartition()) {
                         self.unpartition_network();
-                        log.alert("unpartitioned network: partition={d}", .{self.partition});
+                        log.err("unpartitioned network: partition={d}", .{self.partition});
                     }
                 } else {
                     if (self.options.replica_count > 1 and self.should_partition()) {
                         self.partition_network();
-                        log.alert("partitioned network: partition={d}", .{self.partition});
+                        log.err("partitioned network: partition={d}", .{self.partition});
                     }
                 }
             }
@@ -305,14 +306,14 @@ pub fn PacketSimulator(comptime Packet: type) type {
                             self.replicas_are_in_different_partitions(from, to))
                         {
                             self.stats[@enumToInt(PacketStatistics.dropped_due_to_partition)] += 1;
-                            log.alert("dropped packet (different partitions): from={} to={}", .{ from, to });
+                            log.err("dropped packet (different partitions): from={} to={}", .{ from, to });
                             data.packet.deinit(path);
                             continue;
                         }
 
                         if (self.should_drop()) {
                             self.stats[@enumToInt(PacketStatistics.dropped)] += 1;
-                            log.alert("dropped packet from={} to={}.", .{ from, to });
+                            log.err("dropped packet from={} to={}.", .{ from, to });
                             data.packet.deinit(path);
                             continue;
                         }
@@ -355,7 +356,7 @@ pub fn PacketSimulator(comptime Packet: type) type {
                 const index = self.prng.random.uintLessThanBiased(u64, queue_length);
                 const data = queue.removeIndex(index);
                 data.packet.deinit(path);
-                log.alert("submit_packet: {} reached capacity, dropped packet={}", .{
+                log.err("submit_packet: {} reached capacity, dropped packet={}", .{
                     path,
                     index,
                 });

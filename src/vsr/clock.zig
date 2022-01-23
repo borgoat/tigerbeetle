@@ -95,7 +95,7 @@ pub fn Clock(comptime Time: type) type {
         synchronization_disabled: bool,
 
         pub fn init(
-            allocator: *std.mem.Allocator,
+            allocator: std.mem.Allocator,
             /// The size of the cluster, i.e. the number of clock sources (including this replica).
             replica_count: u8,
             replica: u8,
@@ -133,7 +133,7 @@ pub fn Clock(comptime Time: type) type {
             return self;
         }
 
-        pub fn deinit(self: *Self, allocator: *std.mem.Allocator) void {
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.epoch.sources);
             allocator.free(self.window.sources);
             allocator.free(self.marzullo_tuples);
@@ -273,7 +273,7 @@ pub fn Clock(comptime Time: type) type {
             // Expire the current epoch if successive windows failed to synchronize:
             // Gradual clock drift prevents us from using an epoch for more than a few seconds.
             if (self.epoch.elapsed(self) >= epoch_max) {
-                log.alert(
+                log.err(
                     "{}: no agreement on cluster time (partitioned or too many clock faults)",
                     .{self.replica},
                 );
@@ -320,13 +320,13 @@ pub fn Clock(comptime Time: type) type {
                 // We took too long to synchronize the window, expire stale samples...
                 const sources_sampled = self.window.sources_sampled();
                 if (sources_sampled <= @divTrunc(self.window.sources.len, 2)) {
-                    log.crit("{}: synchronization failed, partitioned (sources={} samples={})", .{
+                    log.err("{}: synchronization failed, partitioned (sources={} samples={})", .{
                         self.replica,
                         sources_sampled,
                         self.window.samples,
                     });
                 } else {
-                    log.crit("{}: synchronization failed, no agreement (sources={} samples={})", .{
+                    log.err("{}: synchronization failed, no agreement (sources={} samples={})", .{
                         self.replica,
                         sources_sampled,
                         self.window.samples,
@@ -462,6 +462,8 @@ fn formatDurationSigned(
     options: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
+    _ = fmt;
+    _ = options;
     if (ns < 0) {
         try writer.print("-{}", .{std.fmt.fmtDuration(@intCast(u64, -ns))});
     } else {
@@ -482,7 +484,7 @@ const ClockUnitTestContainer = struct {
     learn_interval: u64 = 5,
 
     pub fn init(
-        allocator: *std.mem.Allocator,
+        allocator: std.mem.Allocator,
         offset_type: OffsetType,
         offset_coefficient_A: i64,
         offset_coefficient_B: i64,
@@ -584,7 +586,7 @@ test "ideal clocks get clamped to cluster time" {
     std.testing.log_level = .crit;
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    const allocator = arena.allocator();
 
     var ideal_constant_drift_clock = try ClockUnitTestContainer.init(
         allocator,
@@ -646,7 +648,7 @@ const ClockSimulator = struct {
         clock_simulator: *ClockSimulator,
 
         /// PacketSimulator requires this function, but we don't actually have anything to deinit.
-        pub fn deinit(packet: *const Packet, path: Path) void {}
+        pub fn deinit(_: *const Packet, _: Path) void {}
     };
 
     const Options = struct {
@@ -655,14 +657,14 @@ const ClockSimulator = struct {
         network_options: PacketSimulatorOptions,
     };
 
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     options: Options,
     ticks: u64 = 0,
     network: PacketSimulator(Packet),
     clocks: []DeterministicClock,
     prng: std.rand.DefaultPrng,
 
-    pub fn init(allocator: *std.mem.Allocator, options: Options) !ClockSimulator {
+    pub fn init(allocator: std.mem.Allocator, options: Options) !ClockSimulator {
         var self = ClockSimulator{
             .allocator = allocator,
             .options = options,
@@ -756,7 +758,7 @@ test "fuzz test" {
     std.testing.log_level = .emerg; // silence all clock logs
     var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_allocator.deinit();
-    const allocator = &arena_allocator.allocator;
+    const allocator = arena_allocator.allocator();
     const ticks_max: u64 = 1_000_000;
     const clock_count: u8 = 3;
     const test_delta_time: u64 = std.time.ns_per_s / 2;
@@ -788,6 +790,7 @@ test "fuzz test" {
         simulator.tick();
 
         const test_time: u64 = simulator.ticks * test_delta_time;
+        _ = test_time;
         for (simulator.clocks) |*clock, index| {
             var offset = clock.time.offset(simulator.ticks);
             var abs_offset = if (offset >= 0) @intCast(u64, offset) else @intCast(u64, -offset);

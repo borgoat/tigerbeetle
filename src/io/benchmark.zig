@@ -47,14 +47,14 @@ pub fn main() !void {
     }
 
     // Setup the server socket
-    self.server.fd = try IO.openSocket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+    self.server.fd = try IO.openSocket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
     defer os.closeSocket(self.server.fd);
 
     const address = try std.net.Address.parseIp4("127.0.0.1", 3131);
     try os.setsockopt(
         self.server.fd,
-        os.SOL_SOCKET,
-        os.SO_REUSEADDR,
+        os.SOL.SOCKET,
+        os.SO.REUSEADDR,
         &std.mem.toBytes(@as(c_int, 1)),
     );
     try os.bind(self.server.fd, &address.any, address.getOsSockLen());
@@ -70,7 +70,7 @@ pub fn main() !void {
     );
 
     // Setup the client connection
-    self.tx.socket.fd = try IO.openSocket(os.AF_INET, os.SOCK_STREAM, os.IPPROTO_TCP);
+    self.tx.socket.fd = try IO.openSocket(os.AF.INET, os.SOCK.STREAM, os.IPPROTO.TCP);
     defer os.closeSocket(self.tx.socket.fd);
 
     self.io.connect(

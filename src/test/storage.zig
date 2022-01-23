@@ -98,7 +98,7 @@ pub const Storage = struct {
     ticks: u64 = 0,
 
     pub fn init(
-        allocator: *mem.Allocator,
+        allocator: mem.Allocator,
         size: u64,
         options: Storage.Options,
         replica_index: u8,
@@ -114,11 +114,11 @@ pub const Storage = struct {
 
         var reads = std.PriorityQueue(*Storage.Read).init(allocator, Storage.Read.less_than);
         errdefer reads.deinit();
-        try reads.ensureCapacity(config.io_depth_read);
+        try reads.ensureTotalCapacity(config.io_depth_read);
 
         var writes = std.PriorityQueue(*Storage.Write).init(allocator, Storage.Write.less_than);
         errdefer writes.deinit();
-        try writes.ensureCapacity(config.io_depth_write);
+        try writes.ensureTotalCapacity(config.io_depth_write);
 
         return Storage{
             .memory = memory,
@@ -138,7 +138,7 @@ pub const Storage = struct {
         storage.writes.len = 0;
     }
 
-    pub fn deinit(storage: *Storage, allocator: *mem.Allocator) void {
+    pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
         allocator.free(storage.memory);
         storage.reads.deinit();
         storage.writes.deinit();

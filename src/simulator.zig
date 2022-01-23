@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
@@ -17,7 +18,7 @@ const output = std.log.scoped(.state_checker);
 
 /// Set this to `false` if you want to see how literally everything works.
 /// This will run much slower but will trace all logic across the cluster.
-const log_state_transitions_only = std.builtin.mode != .Debug;
+const log_state_transitions_only = builtin.mode != .Debug;
 
 /// You can fine tune your log levels even further (debug/info/notice/warn/err/crit/alert/emerg):
 pub const log_level: std.log.Level = if (log_state_transitions_only) .info else .debug;
@@ -40,13 +41,13 @@ pub fn main() !void {
         break :seed_from_arg parse_seed(arg_two);
     };
 
-    if (std.builtin.mode == .ReleaseFast or std.builtin.mode == .ReleaseSmall) {
+    if (builtin.mode == .ReleaseFast or builtin.mode == .ReleaseSmall) {
         // We do not support ReleaseFast or ReleaseSmall because they disable assertions.
         @panic("the simulator must be run with -OReleaseSafe");
     }
 
     if (seed == seed_random) {
-        if (std.builtin.mode != .ReleaseSafe) {
+        if (builtin.mode != .ReleaseSafe) {
             // If no seed is provided, than Debug is too slow and ReleaseSafe is much faster.
             @panic("no seed provided: the simulator must be run with -OReleaseSafe");
         }
@@ -222,7 +223,7 @@ fn chance(random: *std.rand.Random, p: u8) bool {
 }
 
 /// Returns the next argument for the simulator or null (if none available)
-fn args_next(args: *std.process.ArgIterator, allocator: *std.mem.Allocator) ?[:0]const u8 {
+fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]const u8 {
     const err_or_bytes = args.next(allocator) orelse return null;
     return err_or_bytes catch @panic("Unable to extract next value from args");
 }
