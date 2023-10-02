@@ -14,3 +14,4 @@ ARG TARGETARCH
 COPY tigerbeetle-${TARGETARCH} /tigerbeetle
 
 ENTRYPOINT ["tini", "--", "/tigerbeetle"]
+
